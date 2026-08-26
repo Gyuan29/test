@@ -121,7 +121,7 @@ npm test
 | `FINE_TUNED_MODEL_NAME` | 可选微调模型名称 |
 | `SEARXNG_URLS` | 逗号分隔的 SearXNG 实例池 |
 | `SEARXNG_URL` | 单实例兼容配置 |
-| `SEARXNG_ENGINES` | SearXNG 引擎列表 |
+| `SEARXNG_ENGINES` | SearXNG 引擎列表，默认值为 `google,bing,duckduckgo,baidu,startpage,qwant`。系统支持多引擎配置，若实例不支持 `engines` 参数会自动降级查询。 |
 | `BRAVE_SEARCH_API_KEY` | Brave fallback 密钥 |
 | `BING_SEARCH_API_KEY` | Bing fallback 密钥 |
 | `AUTH_EMAIL` | 初始登录邮箱 |

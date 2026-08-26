@@ -16,7 +16,7 @@ flowchart TD
   H -->|否| G
   H -->|是| I[URL 协议、DNS 公网地址、官网内容验证]
   G --> I
-  I --> J[来源 checkpoint 与原子备份]
+  I --> J[来源 checkpoint 与进度直接写入]
   J --> K[search_status + search_progress]
   K --> L[import_sources.ts]
   L --> M[(SQLite / Drizzle)]
@@ -55,14 +55,14 @@ flowchart TD
 
 ## 来源发现
 
-`discover_sources.ts` 启动时调用 `checkSearxngPool`，只使用健康的 SearXNG 实例。查询无结果或实例失败时，才按顺序使用 Brave 和 Bing。所有 provider 的结果统一经过：
+`discover_sources.ts` 启动时调用 `checkSearxngPool`，优先使用可配置的 SearXNG 多引擎聚合（默认支持 Google、Bing、DuckDuckGo、Baidu、Startpage 和 Qwant）。查询无结果或实例失败时，自动降级到 Brave/Bing API。所有 provider 的结果统一经过：
 
 1. HTTP/HTTPS 协议检查。
 2. 社交媒体、百科和明显非官方域名排除。
 3. DNS 解析及私网、环回、保留地址阻断。
 4. 机构名称匹配和官网内容验证。
 
-每个机构完成后立即更新 `organizations.last_searched_at`、`organizations.search_status` 和 `data/search_progress.json`。输出文件通过临时文件和原子替换保存，覆盖前保留时间戳备份。
+每个机构完成后立即更新 `organizations.last_searched_at`、`organizations.search_status` 和 `data/search_progress.json`。进度文件采用直接覆盖写入策略，避免 Windows 环境下前端轮询读取导致的 EPERM 锁冲突。
 
 ## 事件搜索与质量治理
 
