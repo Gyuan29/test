@@ -1,5 +1,21 @@
 # Institution Intelligence
 
+> ⚠️ 注意：`npm run ai:enrich` 是生成机构简介的必需步骤。导入机构和来源不会自动生成简介，完成来源导入后必须执行该命令。
+
+### 标准运行流程
+
+```bash
+npm run data:extract-organizations
+npm run data:discover-sources
+npm run db:import-sources
+npm run ai:enrich
+npm run ai:search-news
+```
+
+核心能力包括数据库级事件防重、全链路时间窗口控制、高并发连接控制，以及数据漏斗可观测日志。
+
+`SEARXNG_ENGINES` 控制 SearXNG 引擎列表；`MIN_RELEVANCE_SCORE` 控制事件最低相关性评分（默认 4）。并发和超时可通过 `SEARXNG_CONCURRENCY`、`HOMEPAGE_CONCURRENCY`、`LLM_CONCURRENCY`、`HTTP_TIMEOUT_MS` 等变量调整，默认值保持现有行为。
+
 Institution Intelligence 是一个面向研究、投资和产业团队的机构情报系统。项目采用“安全基座 + AI 引擎”架构，将公开机构资料、官网来源和新闻事件整理为可检索、可追溯的数据资产。
 
 仅允许采集合法授权的公开信息。请遵守目标站点的 robots 规则、服务条款、频率限制及适用法律。

@@ -7,7 +7,8 @@ import { requireAdmin } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-type Body = { skipHours?: unknown; limit?: unknown; force?: unknown };
+type Body = { skipHours?: unknown; limit?: unknown; force?: unknown; days?: unknown };
+const DEFAULT_EVENT_LOOKBACK_DAYS = Number(process.env.EVENT_LOOKBACK_DAYS) || 365;
 function integer(value: unknown, fallback: number, minimum = 0): number | null { if (value === undefined) return fallback; const parsed = typeof value === "number" ? value : Number(value); return Number.isInteger(parsed) && parsed >= minimum ? parsed : null; }
 function writeProgress(path: string, progress: Record<string, unknown>): void { writeFileSync(path, `${JSON.stringify({ ...progress, lastUpdated: new Date().toISOString() }, null, 2)}\n`, "utf8"); }
 function markFailed(path: string, taskId: string, message: string): void { try { const current = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown> : {}; if (current.taskId && current.taskId !== taskId) return; writeProgress(path, { ...current, taskId, status: "failed", message }); } catch (error) { console.error(`[trigger-event-search:${taskId}] progress failure`, error); } }
@@ -17,12 +18,13 @@ export async function POST(request: NextRequest) {
   const denied = await requireAdmin(request); if (denied) return denied;
   const body = await request.json().catch(() => ({})) as Body;
   const skipHours = integer(body.skipHours, 24); const limit = body.limit === undefined ? null : integer(body.limit, 1, 1);
-  if (skipHours === null || (body.limit !== undefined && limit === null)) return NextResponse.json({ success: false, error: "skipHours and limit must be valid integers" }, { status: 400 });
+  const days = integer(body.days, DEFAULT_EVENT_LOOKBACK_DAYS, 1);
+  if (skipHours === null || days === null || (body.limit !== undefined && limit === null)) return NextResponse.json({ success: false, error: "skipHours, days and limit must be valid integers" }, { status: 400 });
   const taskId = `event_search_${randomUUID()}`; const progressPath = resolve(process.cwd(), "data", "event_search_progress.json"); mkdirSync(resolve(process.cwd(), "data"), { recursive: true });
   writeProgress(progressPath, { taskId, total: 0, processed: 0, success: 0, failed: 0, currentInstitution: null, status: "starting" });
   const script = join(process.cwd(), "scripts", "ai-tasks", "search_news.ts"); const tsxCli = join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
   if (!existsSync(script) || !existsSync(tsxCli)) { const error = `Search script not found: ${script}`; markFailed(progressPath, taskId, error); return NextResponse.json({ success: false, error }, { status: 500 }); }
-  const args = [tsxCli, script, "--skip-hours", String(skipHours), "--task-id", taskId]; if (limit !== null) args.push("--limit", String(limit)); if (body.force === true) args.push("--force");
+  const args = [tsxCli, script, "--skip-hours", String(skipHours), "--days", String(days), "--task-id", taskId]; if (limit !== null) args.push("--limit", String(limit)); if (body.force === true) args.push("--force");
   try {
     console.log(`[trigger-event-search:${taskId}] starting ${process.execPath} ${args.join(" ")}`);
     const child = spawn(process.execPath, args, { cwd: process.cwd(), env: { ...process.env }, detached: true, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });

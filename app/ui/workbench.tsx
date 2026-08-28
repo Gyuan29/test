@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import type { Insights, Organization } from "@/app/ui/types";
+import type { Insights, Organization, OrganizationSearchResponse } from "@/app/ui/types";
 
 const emptyInsights: Insights = { organizationCount: 0, eventCount: 0, recentEvents: [], configured: false };
 
@@ -51,9 +51,6 @@ export function Workbench({ mockInsights, mockOrganizations, mockStats }: Workbe
       })
       .catch(() => undefined)
       .finally(() => alive && setLoading(false));
-    return () => {
-      alive = false;
-    };
     return () => {
       alive = false;
     };

@@ -15,6 +15,7 @@
     "db:init": "tsx scripts/data-pipeline/init-fts5.ts",
     "auth:create-first-admin": "tsx scripts/create-first-admin.ts",
     "db:seed": "tsx scripts/data-pipeline/seed.ts",
+    "data:clean-events": "tsx scripts/clean-old-events.ts",
     "db:import-sources": "tsx scripts/data-pipeline/import_sources.ts",
     "data:clean-content": "node scripts/data-pipeline/clean_content.mjs",
     "data:extract-organizations": "python scripts/data-pipeline/extract_organizations.py",

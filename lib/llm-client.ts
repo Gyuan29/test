@@ -6,6 +6,12 @@ export const LLM_MODEL_NAME = process.env.LLM_MODEL_NAME?.trim() || "qwen2.5:3b"
 
 const client = new OpenAI({ baseURL, apiKey, maxRetries: 0 });
 
+export type ChatCompletionOptions = {
+  model?: string;
+  timeout?: number;
+  [key: string]: unknown;
+};
+
 function isNetworkError(error: unknown): boolean {
   if (error instanceof TypeError) return true;
   const value = error as { name?: unknown; code?: unknown; cause?: { code?: unknown } } | null;
@@ -25,8 +31,7 @@ function completionText(content: unknown): string {
 }
 
 /** Call any OpenAI-compatible chat endpoint, including Ollama and internal models. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function chatCompletion(systemPrompt: string, userPrompt: string, options: any = {}): Promise<string> {
+export async function chatCompletion(systemPrompt: string, userPrompt: string, options: ChatCompletionOptions = {}): Promise<string> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
@@ -35,7 +40,7 @@ export async function chatCompletion(systemPrompt: string, userPrompt: string, o
         model: options.model || LLM_MODEL_NAME,
         messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
         temperature: 0.1,
-      });
+      } as never);
       const text = completionText(completion.choices?.[0]?.message?.content);
       if (!text) throw new Error("LLM returned an empty completion");
       return text;

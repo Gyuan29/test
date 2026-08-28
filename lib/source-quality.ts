@@ -4,6 +4,7 @@ type Candidate = { url: string; title?: string; content?: string };
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 import { fetchExternalUrl } from "./security-url";
+import { fetchControlled } from "./http-control";
 
 const MAX_HOME_PAGE_BYTES = 512 * 1024;
 
@@ -27,10 +28,44 @@ function identityTerms(identity: OrganizationIdentity): string[] {
     .filter((value) => value.length >= 2);
 }
 
+const GENERIC_TERMS = new Set(["university", "institute", "institution", "college", "school", "academy", "center", "centre", "official", "the"]);
+
+function coreTerms(identity: OrganizationIdentity): string[] {
+  return identityTerms(identity).flatMap((term) => {
+    const words = term.split(" ").filter((word) => word.length >= 3 && !GENERIC_TERMS.has(word));
+    return [term, ...words];
+  });
+}
+
 function hasEvidence(text: string, identity: OrganizationIdentity): boolean {
   const normalized = normalize(text);
   const compactText = normalized.replace(/\s+/g, "");
   return identityTerms(identity).some((term) => normalized.includes(term) || compactText.includes(compact(term)));
+}
+
+function hasCoreEvidence(text: string, identity: OrganizationIdentity): boolean {
+  const normalized = normalize(text);
+  const compactText = normalized.replace(/\s+/g, "");
+  return coreTerms(identity).some((term) => normalized.includes(term) || compactText.includes(compact(term)));
+}
+
+function failure(identity: OrganizationIdentity, value: string, reason: string): false {
+  console.warn(`[验证失败] 机构 ${identity.name}, URL: ${value}, 原因: ${reason}`);
+  return false;
+}
+
+function isObviousSpam(hostname: string, body: string): boolean {
+  const host = hostname.toLocaleLowerCase();
+  return /(?:^|\.)(?:blog|forum|bbs|medium|wordpress|zhihu|reddit|quora)\./i.test(host)
+    || /(?:powered by wordpress|论坛|博客|讨论区|sign in to continue)/i.test(body);
+}
+
+function metaDescription(html: string): string {
+  return [...html.matchAll(/<meta\b[^>]*>/gi)].flatMap((match) => {
+    const tag = match[0];
+    const name = tag.match(/\b(?:name|property)=["']([^"']+)["']/i)?.[1]?.toLocaleLowerCase();
+    return name === "description" || name === "og:description" ? [tag.match(/\bcontent=["']([^"']*)["']/i)?.[1] || ""] : [];
+  }).join(" ");
 }
 
 function domainHasKeyword(hostname: string, identity: OrganizationIdentity): boolean {
@@ -74,6 +109,7 @@ async function readLimited(response: Response): Promise<string> {
     body += decoder.decode();
     return body;
   } finally {
+    try { await reader.cancel(); } catch { /* response may already be complete */ }
     reader.releaseLock();
   }
 }
@@ -81,16 +117,17 @@ async function readLimited(response: Response): Promise<string> {
 export async function verifyCandidateHomepage(
   value: string,
   identity: OrganizationIdentity,
-  options: { fetchImpl?: FetchLike; timeoutMs?: number; maxRedirects?: number } = {},
+  options: { fetchImpl?: FetchLike; timeoutMs?: number; maxRedirects?: number; loose?: boolean } = {},
 ): Promise<boolean> {
   let current: URL;
   try {
     current = new URL(value);
   } catch {
-    return false;
+    return failure(identity, value, "URL 无效");
   }
-  if (current.protocol !== "https:" && current.protocol !== "http:") return false;
+  if (current.protocol !== "https:" && current.protocol !== "http:") return failure(identity, value, "不支持的协议");
   const fetchImpl = options.fetchImpl || (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => fetchExternalUrl(String(input), {
+    fetchImpl: (request, requestInit) => fetchControlled(request, requestInit, options.timeoutMs ?? 10_000),
     headers: init?.headers,
     timeoutMs: options.timeoutMs ?? 10_000,
     maxRedirects: options.maxRedirects ?? 2,
@@ -105,31 +142,42 @@ export async function verifyCandidateHomepage(
         headers: { accept: "text/html,application/xhtml+xml" },
         signal: AbortSignal.timeout(options.timeoutMs ?? 10_000),
       });
-    } catch {
-      return false;
+    } catch (error) {
+      return failure(identity, current.toString(), `请求失败: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get("location");
-      if (!location) return false;
+      if (!location) { try { await response.body?.cancel(); } catch (error) { console.warn(`[source-quality] response cleanup failed: ${error instanceof Error ? error.message : String(error)}`); } return failure(identity, current.toString(), "重定向缺少 Location"); }
       try {
         current = new URL(location, current);
       } catch {
-        return false;
+        return failure(identity, current.toString(), "重定向 URL 无效");
       }
-      if (current.protocol !== "https:" && current.protocol !== "http:") return false;
+      if (current.protocol !== "https:" && current.protocol !== "http:") return failure(identity, current.toString(), "重定向到不支持的协议");
       continue;
     }
-    if (!response.ok) return false;
+    if (!response.ok) { try { await response.body?.cancel(); } catch (error) { console.warn(`[source-quality] response cleanup failed: ${error instanceof Error ? error.message : String(error)}`); } return failure(identity, current.toString(), `HTTP ${response.status}`); }
     const contentType = response.headers.get("content-type") || "";
-    if (contentType && !/text\/html|application\/xhtml\+xml/i.test(contentType)) return false;
+    if (contentType && !/text\/html|application\/xhtml\+xml/i.test(contentType)) { try { await response.body?.cancel(); } catch (error) { console.warn(`[source-quality] response cleanup failed: ${error instanceof Error ? error.message : String(error)}`); } return failure(identity, current.toString(), `非 HTML 内容类型: ${contentType}`); }
     let body: string;
     try {
       body = await readLimited(response);
-    } catch {
-      return false;
+    } catch (error) {
+      return failure(identity, current.toString(), `读取页面失败: ${error instanceof Error ? error.message : String(error)}`);
     }
     const visible = body.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ");
-    return hasEvidence(visible, identity) || hasEvidence(body, identity);
+    if (isObviousSpam(current.hostname, visible)) return failure(identity, current.toString(), "疑似博客/论坛等垃圾站点");
+    if (hasEvidence(visible, identity) || hasEvidence(body, identity)) return true;
+    const title = body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "";
+    const descriptions = metaDescription(body);
+    if (options.loose === true && hasCoreEvidence(`${title} ${descriptions}`, identity)) return true;
+    // Some legitimate institutional homepages are client-rendered and expose
+    // little text to a crawler. Accept a matching host plus an institutional
+    // marker instead of rejecting them solely on DOM text extraction.
+    const hostMatches = domainHasKeyword(current.hostname, identity);
+    const institutionalMarker = /university|institute|college|school|academy|官方|大学|学院|研究所|研究院/i.test(visible);
+    if (hostMatches && institutionalMarker) return true;
+    return failure(identity, current.toString(), "未找到机构名或核心关键词");
   }
-  return false;
+  return failure(identity, current.toString(), "超过最大重定向次数");
 }

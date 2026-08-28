@@ -57,3 +57,5 @@ next-env.d.ts
 # Runtime logs and sensitive organization inputs
 *.log
 *.docx
+*.bak
+*.tmp

@@ -247,6 +247,11 @@ export type OrganizationRow = Record<string, unknown> & {
   location_confidence?: string | null;
   summary?: string | null;
   website_url?: string | null;
+  sources?: string | null;
+  last_searched_at?: string | null;
+  search_status?: string | null;
+  last_event_searched_at?: string | null;
+  event_search_status?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -256,6 +261,7 @@ export type EventRow = Record<string, unknown> & {
   organization_id: string;
   event_date: string;
   event_type?: string | null;
+  relevance_score?: number | null;
   title: string;
   summary?: string | null;
   translated_title?: string | null;
@@ -290,6 +296,11 @@ export function mapOrganization(row: OrganizationRow): Organization {
     locationConfidence: row.location_confidence ?? null,
     summary: row.summary ?? null,
     websiteUrl: row.website_url ?? null,
+    sources: row.sources ?? "[]",
+    lastSearchedAt: row.last_searched_at ?? null,
+    searchStatus: row.search_status === "success" || row.search_status === "failed" ? row.search_status : "pending",
+    lastEventSearchedAt: row.last_event_searched_at ?? null,
+    eventSearchStatus: row.event_search_status === "success" || row.event_search_status === "failed" ? row.event_search_status : "pending",
     createdAt: row.created_at ?? "",
     updatedAt: row.updated_at ?? "",
   };
@@ -303,6 +314,7 @@ export function mapEvent(row: EventRow): Event {
     organizationId: row.organization_id,
     eventDate: normalizeEventDate(row.event_date) ?? "unknown",
     eventType: row.event_type ?? null,
+    relevanceScore: row.relevance_score == null ? null : Number(row.relevance_score),
     title,
     summary: row.summary ?? null,
     translatedTitle: row.translated_title == null ? null : normalizeEventTitle(row.translated_title, title),

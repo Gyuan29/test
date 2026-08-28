@@ -17,10 +17,19 @@ test("homepage verification requires organization evidence in page content", asy
   assert.equal(official, true);
 });
 
+test("homepage verification loose mode accepts core keyword in title or meta description", async () => {
+  const { verifyCandidateHomepage } = await import("../lib/source-quality");
+  const organization = { name: "Massachusetts Institute of Technology", aliases: ["MIT"] };
+  const titleOnly = await verifyCandidateHomepage("https://example.edu/", organization, {
+    loose: true,
+    fetchImpl: async () => new Response("<html><title>Institute of Technology - Innovation</title><body>Welcome</body></html>", { status: 200, headers: { "content-type": "text/html" } }),
+  });
+  assert.equal(titleOnly, true);
+});
+
 test("SearXNG health check rejects an endpoint returning irrelevant results", async () => {
   const { checkSearxngHealth } = await import("../lib/searxng-health");
   const result = await checkSearxngHealth("https://search.example", { fetchImpl: async () => new Response(JSON.stringify({ results: [{ url: "https://dictionary.example/bar", title: "Bar definition", content: "A bar" }] }), { status: 200, headers: { "content-type": "application/json" } }) });
   assert.equal(result.ok, false);
   assert.equal(result.reason, "irrelevant_results");
 });
-

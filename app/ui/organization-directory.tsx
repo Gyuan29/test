@@ -43,7 +43,7 @@ export function OrganizationDirectory({ mockResult }: OrganizationDirectoryProps
     }
 
     const params = new URLSearchParams({ limit: "50" });
-    if (query) params.set("q", query);
+    if (query) params.set("search", query);
     if (type) params.set("type", type);
     if (region) params.set("region", region);
     if (country) params.set("country", country);
@@ -51,12 +51,11 @@ export function OrganizationDirectory({ mockResult }: OrganizationDirectoryProps
     fetch(`/api/organizations?${params.toString()}`, { cache: "no-store" })
       .then(async (response) => { const payload = await response.json() as { success: boolean; data?: Organization[]; pagination?: { total: number; page: number; limit: number } }; if (!response.ok || !payload.success) throw new Error("request_failed"); return { items: payload.data ?? [], total: payload.pagination?.total ?? 0, limit: payload.pagination?.limit ?? 50, offset: ((payload.pagination?.page ?? 1) - 1) * (payload.pagination?.limit ?? 50), query, configured: true }; })
       .then((nextResult) => setResult(nextResult))
-      .catch(() => setResult(initialResult))
+      .catch((error: unknown) => {
+        console.error(`[organization-directory] request failed: ${error instanceof Error ? error.message : String(error)}`);
+        setResult(initialResult);
+      })
       .finally(() => setLoading(false));
-    return () => undefined;
-    return () => {
-      alive = false;
-    };
   }, [query, type, region, country, core, mockResult]);
 
   function submit(event: FormEvent<HTMLFormElement>) {

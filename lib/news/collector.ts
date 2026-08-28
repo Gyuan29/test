@@ -11,7 +11,7 @@ export async function fetchOfficialSource(url: string, options: FetchOptions = {
     const response = fetchImpl === fetch ? await fetchExternalUrl(url, { timeoutMs: options.timeoutMs }) : await fetchImpl(url, { redirect: "manual", signal: AbortSignal.timeout(options.timeoutMs ?? 15_000) });
     last = response;
     if (response.status < 500 && response.status !== 429) return response;
-    try { await response.body?.cancel(); } catch {}
+    try { await response.body?.cancel(); } catch (error) { console.warn(`[collector] response cleanup failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
   return last!;
 }
