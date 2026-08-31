@@ -29,6 +29,13 @@
       "when": 1787747716213,
       "tag": "0003_steady_demogoblin",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1788142774189,
+      "tag": "0004_black_smasher",
+      "breakpoints": true
     }
   ]
 }

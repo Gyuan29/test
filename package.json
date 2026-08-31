@@ -22,6 +22,8 @@
     "data:discover-sources": "node --env-file-if-exists=.env.local node_modules/tsx/dist/cli.mjs scripts/data-pipeline/discover_sources.ts",
     "ai:enrich": "node --env-file-if-exists=.env.local node_modules/tsx/dist/cli.mjs scripts/ai-tasks/enrich_data.ts",
     "ai:search-news": "node --env-file-if-exists=.env.local node_modules/tsx/dist/cli.mjs scripts/ai-tasks/search_news.ts",
+    "ai:daily-briefing": "node --env-file-if-exists=.env.local node_modules/tsx/dist/cli.mjs scripts/ai-tasks/generate_daily_briefing.ts",
+    "test:inject-briefing-data": "node --env-file-if-exists=.env.local node_modules/tsx/dist/cli.mjs scripts/test-inject-briefing-data.ts",
     "ai:translate": "tsx scripts/ai-tasks/translate_descriptions.ts",
     "ai:translate-events": "tsx scripts/ai-tasks/translate_events.ts"
   },

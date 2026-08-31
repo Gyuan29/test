@@ -10,6 +10,8 @@ npm run data:discover-sources
 npm run db:import-sources
 npm run ai:enrich
 npm run ai:search-news
+# 5. 生成每日 AI 情报简报 (需配置 WEBHOOK_URL)
+npm run ai:daily-briefing
 ```
 
 核心能力包括数据库级事件防重、全链路时间窗口控制、高并发连接控制，以及数据漏斗可观测日志。
@@ -34,6 +36,8 @@ Institution Intelligence 是一个面向研究、投资和产业团队的机构�
 
 - 🧹 官网正文清洗和机构简介生成
 - 🤖 LLM 事件抽取、分类和摘要
+- 🧠 智能降噪与 Token 优化：集成结构化新闻提取器，自动剥离网页噪声，将 LLM 输入 Token 消耗降低 30%-70%，并支持多平台规则与通用 Fallback
+- 📰 每日 AI 情报简报：支持定时聚合高相关性事件，通过 LLM 生成结构化洞察报告，并一键推送到飞书/钉钉/企业微信等 Webhook 渠道
 - 📊 `relevanceScore` 评分，默认过滤低于 6 分的事件
 - ♻️ 标题相似度去重和跨批次 URL 去重
 - 💬 `search_institution_database` Tool Calling 防止无依据回答
@@ -72,16 +76,18 @@ flowchart TD
   L --> J
   J --> M[search_news.ts]
   M --> N[新闻与官网候选]
-  N --> O[LLM 事件抽取]
-  O --> P[评分与标题去重]
-  P --> Q[events]
-  Q --> J
-  J --> R[Next.js 页面与 API]
-  J --> S[Chat Tool Calling]
-  S --> T[鉴权 + 限流 + SSE]
-  U[管理后台] --> V[触发任务 / 进度轮询]
-  V --> D
-  V --> M
+  N --> O[候选 URL 去重]
+  O --> P[结构化新闻提取 Extractor]
+  P --> Q[LLM 事件抽取]
+  Q --> R[评分与标题去重]
+  R --> S[events]
+  S --> J
+  J --> T[Next.js 页面与 API]
+  J --> U[Chat Tool Calling]
+  U --> V[鉴权 + 限流 + SSE]
+  W[管理后台] --> X[触发任务 / 进度轮询]
+  X --> D
+  X --> M
 ```
 
 ## 技术栈
@@ -106,6 +112,8 @@ npm run data:discover-sources
 npm run db:import-sources
 npm run ai:enrich
 npm run ai:search-news
+# 5. 生成每日 AI 情报简报 (需配置 WEBHOOK_URL)
+npm run ai:daily-briefing
 npm run dev
 ```
 
@@ -146,6 +154,20 @@ npm test
 | `AUTH_SESSION_SECRET` | 会话签名密钥 |
 | `CREDENTIAL_ENCRYPTION_KEY` | Worker 凭据加密密钥 |
 | `ADMIN_API_TOKEN` | 管理后台 API Token |
+| `ENABLE_NEWS_EXTRACTOR` | 是否启用结构化新闻提取器，默认 `false` |
+| `NEWS_EXTRACTOR_CONCURRENCY` | Extractor 并发 URL 数，默认 `4` |
+| `NEWS_EXTRACTOR_TIMEOUT_MS` | Extractor 单 URL 请求超时（毫秒），默认 `12000` |
+| `NEWS_EXTRACTOR_MAX_CHARS` | 传给 LLM 的正文最大字符数，默认 `8000` |
+| `NEWS_EXTRACTOR_MIN_BODY_CHARS` | 判定正文提取成功的最小字符数，默认 `160` |
+| `ENABLE_DAILY_BRIEFING` | 是否启用每日简报任务，默认 `false` |
+| `DAILY_BRIEFING_LOOKBACK_HOURS` | 简报查询时间窗口，默认最近 `24` 小时 |
+| `DAILY_BRIEFING_MIN_SCORE` | 纳入简报的最低相关性分数，默认 `6` |
+| `DAILY_BRIEFING_MAX_EVENTS` | 单次简报最多处理事件数，默认 `60` |
+| `DAILY_BRIEFING_MAX_OUTPUT_TOKENS` | LLM 简报输出上限，默认 `3000` tokens |
+| `WEBHOOK_PROVIDER` | 推送平台：`feishu`、`dingtalk`、`wework` 或 `generic` |
+| `WEBHOOK_URL` | 通用 Webhook 地址；为空时跳过推送 |
+| `WEBHOOK_TIMEOUT_MS` | Webhook 请求超时（毫秒），默认 `15000` |
+| `WEBHOOK_RETRY_COUNT` | 网络错误或 5xx 的重试次数，默认 `2` |
 
 ## 管理后台
 

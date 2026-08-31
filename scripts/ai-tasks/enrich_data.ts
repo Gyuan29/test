@@ -22,6 +22,7 @@ const REQUEST_DELAY_MS = Number(process.env.ENRICH_REQUEST_DELAY_MS) || 1500;
 const LLM_TIMEOUT_MS = Number(process.env.ENRICH_LLM_TIMEOUT_MS) || 120_000;
 const MAX_SEARCH_RESULTS = 3;
 const MIN_PAGE_TEXT_LENGTH = 20;
+const MIN_DESCRIPTION_LENGTH = 80;
 const RETRY_DELAYS_MS = [2_000, 5_000] as const;
 const USER_AGENTS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -332,8 +333,8 @@ async function main(): Promise<void> {
     const rows = await db.select({ entityId: organizations.entityId, name: organizations.name, description: organizations.description, officialDomain: organizations.websiteUrl }).from(organizations).all() as unknown as Candidate[];
     const pending = rows.filter((organization) => {
       const length = organization.description?.trim().length || 0;
-      if (!force && length >= 10 && completed.has(organization.entityId)) { skipped += 1; console.log(`[跳过] 机构 ${organization.name}: 原因 (已完成且简介长度 ${length})`); return false; }
-      if (!force && length >= 10) { skipped += 1; console.log(`[跳过] 机构 ${organization.name}: 原因 (已有简介且长度 ${length})`); return false; }
+      if (!force && length >= MIN_DESCRIPTION_LENGTH && completed.has(organization.entityId)) { skipped += 1; console.log(`[跳过] 机构 ${organization.name}: 原因 (已完成且简介长度 ${length})`); return false; }
+      if (!force && length >= MIN_DESCRIPTION_LENGTH) { skipped += 1; console.log(`[跳过] 机构 ${organization.name}: 原因 (已有简介且长度 ${length})`); return false; }
       return true;
     }).slice(0, limit);
     const total = pending.length;

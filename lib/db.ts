@@ -128,6 +128,20 @@ const LOCAL_SCHEMA = `
   CREATE INDEX IF NOT EXISTS news_sources_organization_idx ON news_sources(organization_slug);
   CREATE INDEX IF NOT EXISTS news_sources_status_idx ON news_sources(retry_class, last_fetch_status);
 
+  CREATE TABLE IF NOT EXISTS briefing_runs (
+    id TEXT PRIMARY KEY,
+    window_start TEXT NOT NULL,
+    window_end TEXT NOT NULL,
+    event_count INTEGER NOT NULL DEFAULT 0,
+    content_hash TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('running', 'generated', 'pushed', 'failed', 'skipped')),
+    generated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    pushed_at TEXT,
+    error TEXT,
+    UNIQUE (window_start, window_end, content_hash)
+  );
+  CREATE INDEX IF NOT EXISTS briefing_runs_window_idx ON briefing_runs(window_start, window_end);
+
 `;
 
 class LocalPreparedStatement implements D1PreparedStatement {

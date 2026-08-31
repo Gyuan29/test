@@ -1,4 +1,6 @@
 
+import { fetchControlled } from "./http-control";
+
 type FetchOptions = { fetchImpl?: typeof fetch; timeoutMs?: number; maxRedirects?: number; headers?: HeadersInit };
 
 function isPrivateIp(value: string): boolean {
@@ -31,7 +33,7 @@ async function resolvesPublicHost(hostname: string): Promise<boolean> {
 }
 
 export async function fetchExternalUrl(value: string, options: FetchOptions = {}): Promise<Response> {
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetchImpl = options.fetchImpl ?? ((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => fetchControlled(input, init, options.timeoutMs ?? 15_000));
   const maxRedirects = options.maxRedirects ?? 3;
   let current = validateExternalUrl(value);
   if (!current.ok || !(await resolvesPublicHost(current.url.hostname))) return new Response("blocked", { status: 400 });

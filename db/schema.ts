@@ -191,9 +191,35 @@ export const newsSources = sqliteTable(
   }),
 );
 
+export const briefingRuns = sqliteTable(
+  "briefing_runs",
+  {
+    id: text("id").primaryKey(),
+    windowStart: text("window_start").notNull(),
+    windowEnd: text("window_end").notNull(),
+    eventCount: integer("event_count").notNull().default(0),
+    contentHash: text("content_hash").notNull(),
+    status: text("status", {
+      enum: ["running", "generated", "pushed", "failed", "skipped"],
+    }).notNull(),
+    generatedAt: text("generated_at").notNull().default(currentTimestamp()),
+    pushedAt: text("pushed_at"),
+    error: text("error"),
+  },
+  (table) => ({
+    windowUnique: uniqueIndex("briefing_runs_window_content_uq").on(
+      table.windowStart,
+      table.windowEnd,
+      table.contentHash,
+    ),
+    windowIdx: index("briefing_runs_window_idx").on(table.windowStart, table.windowEnd),
+  }),
+);
+
 export type Organization = typeof organizations.$inferSelect;
 export type Event = typeof events.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type ChatSession = typeof chatSessions.$inferSelect;
 export type NewsSource = typeof newsSources.$inferSelect;
+export type BriefingRun = typeof briefingRuns.$inferSelect;
