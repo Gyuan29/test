@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
-import { getDatabase } from "@/lib/db";
+import { getAuthDatabase, getDatabase } from "@/lib/db";
 import { normalizeEventDate, normalizeEventDescription, normalizeEventTitle } from "@/lib/event-display";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +22,8 @@ export async function GET(request: NextRequest) {
   try {
     const db = await getDatabase();
     if (!db) return NextResponse.json({ success: false, error: "Database is not configured" }, { status: 503 });
-    if (!(await currentUser(request, db))) return NextResponse.json({ success: false, error: "authentication_required" }, { status: 401 });
+    const authDb = await getAuthDatabase();
+    if (!authDb || !(await currentUser(request, authDb))) return NextResponse.json({ success: false, error: "authentication_required" }, { status: 401 });
     const clauses: string[] = [];
     const values: Array<string | number> = [];
     if (search) { clauses.push("(e.title LIKE ? OR e.summary LIKE ? OR e.translated_title LIKE ? OR e.translated_description LIKE ? OR o.name LIKE ?)"); values.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`); }

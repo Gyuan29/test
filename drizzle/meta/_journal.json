@@ -36,6 +36,13 @@
       "when": 1788142774189,
       "tag": "0004_black_smasher",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788200000000,
+      "tag": "0007_add_event_unique_constraint",
+      "breakpoints": true
     }
   ]
 }

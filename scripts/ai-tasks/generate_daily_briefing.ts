@@ -47,6 +47,24 @@ type BriefingPayload = {
   watchlist: string[];
 };
 
+type BriefingDevelopmentOutput = string | {
+  title: string;
+  organization: string;
+  summary: string;
+  significance: string;
+  url: string;
+};
+
+type BriefingOutput = {
+  headline: string;
+  keyDevelopments: BriefingDevelopmentOutput[];
+  crossInstitutionTrends: string[];
+  implications: string[];
+  watchlist: string[];
+};
+
+type ParsedBriefing = { ok: true; payload: BriefingPayload } | { ok: false; reason: string; rawPreview: string };
+
 function isoForSql(value: Date): string {
   return value.toISOString().slice(0, 19).replace("T", " ");
 }
@@ -64,38 +82,57 @@ function stringArray(value: unknown): string[] {
   return value.map(text).filter(Boolean);
 }
 
-function parsePayload(response: string, fallbackEvents: EventInput[]): BriefingPayload | null {
-  const body = response.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1] || response;
-  const start = body.indexOf("{");
-  const end = body.lastIndexOf("}");
-  if (start < 0 || end <= start) return null;
+function isValidBriefingOutput(value: unknown): value is BriefingOutput {
+  const current = record(value);
+  if (!current) return false;
+  const allowedKeys = new Set(["headline", "keyDevelopments", "crossInstitutionTrends", "implications", "watchlist"]);
+  if (Object.keys(current).some((key) => !allowedKeys.has(key))) return false;
+  if (typeof current.headline !== "string" || text(current.headline).length === 0) return false;
+  if (!Array.isArray(current.keyDevelopments) || !Array.isArray(current.crossInstitutionTrends) || !Array.isArray(current.implications) || !Array.isArray(current.watchlist)) return false;
+  const validDevelopment = (item: unknown): item is BriefingDevelopmentOutput => {
+    if (typeof item === "string") return text(item).length > 0;
+    const development = record(item);
+    if (!development) return false;
+    const developmentKeys = new Set(["title", "organization", "summary", "significance", "url"]);
+    return !Object.keys(development).some((key) => !developmentKeys.has(key))
+      && typeof development.title === "string"
+      && typeof development.organization === "string"
+      && typeof development.summary === "string"
+      && typeof development.significance === "string"
+      && typeof development.url === "string"
+      && (text(development.title).length > 0 || text(development.summary).length > 0);
+  };
+  return current.keyDevelopments.every(validDevelopment)
+    && current.crossInstitutionTrends.every((item) => typeof item === "string")
+    && current.implications.every((item) => typeof item === "string")
+    && current.watchlist.every((item) => typeof item === "string");
+}
+
+function parsePayload(response: string, fallbackEvents: EventInput[]): ParsedBriefing {
+  const rawPreview = response.slice(0, 300);
+  const fenced = response.match(/^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/i);
+  const body = (fenced?.[1] ?? response).trim();
+  if (!body) return { ok: false, reason: "empty response", rawPreview };
   let parsed: unknown;
-  try { parsed = JSON.parse(body.slice(start, end + 1)) as unknown; } catch {
-    try {
-      const repaired = body.slice(start, end + 1).replace(/,\s*([}\]])/g, "$1").replace(/[“”]/g, '"');
-      parsed = JSON.parse(repaired) as unknown;
-    } catch { return null; }
+  try { parsed = JSON.parse(body) as unknown; } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return { ok: false, reason: `invalid JSON (${detail})`, rawPreview };
   }
-  const value = record(parsed);
-  if (!value) return null;
-  const developments: Development[] = Array.isArray(value.keyDevelopments) ? value.keyDevelopments.flatMap((item): Development[] => {
-    const current = record(item);
-    if (!current) return [];
-    return [{
-      title: text(current.title),
-      organization: text(current.organization),
-      summary: text(current.summary),
-      significance: text(current.significance),
-      url: text(current.url),
-    }];
-  }).filter((item) => item.title || item.summary) : [];
-  if (!developments.length && !fallbackEvents.length) return null;
+  if (!isValidBriefingOutput(parsed)) return { ok: false, reason: "briefing schema validation failed", rawPreview };
+  if (parsed.keyDevelopments.length === 0 && fallbackEvents.length > 0) return { ok: false, reason: "keyDevelopments is empty despite available events", rawPreview };
+  const developments: Development[] = parsed.keyDevelopments.map((item): Development => {
+    if (typeof item === "string") return { title: text(item), organization: "", summary: text(item), significance: "", url: "" };
+    return { title: text(item.title), organization: text(item.organization), summary: text(item.summary), significance: text(item.significance), url: text(item.url) };
+  });
   return {
-    headline: text(value.headline) || "过去 24 小时机构情报简报",
-    keyDevelopments: developments,
-    crossInstitutionTrends: stringArray(value.crossInstitutionTrends),
-    implications: stringArray(value.implications),
-    watchlist: stringArray(value.watchlist),
+    ok: true,
+    payload: {
+      headline: text(parsed.headline),
+      keyDevelopments: developments,
+      crossInstitutionTrends: stringArray(parsed.crossInstitutionTrends),
+      implications: stringArray(parsed.implications),
+      watchlist: stringArray(parsed.watchlist),
+    },
   };
 }
 
@@ -129,6 +166,22 @@ function plainTextFallback(input: EventInput[], windowStart: Date, windowEnd: Da
   const lines = [`过去 ${LOOKBACK_HOURS} 小时机构情报简报`, `时间窗口：${windowStart.toISOString()} 至 ${windowEnd.toISOString()}`, "", "重点动态："];
   input.forEach((item, index) => lines.push(`${index + 1}. ${item.organization}：${item.title}。${item.summary || ""}${item.sourceUrl ? ` 原文：${item.sourceUrl}` : ""}`));
   return lines.join("\n");
+}
+
+async function markdownFallback(input: EventInput[], windowStart: Date, windowEnd: Date): Promise<string> {
+  try {
+    const response = await chatCompletion(
+      "你是机构情报编辑。忽略 JSON 格式要求，直接输出一段可推送的纯文本 Markdown 简报。只使用输入事实，不要补造事件，不要输出代码围栏或解释。",
+      JSON.stringify({ windowStart: windowStart.toISOString(), windowEnd: windowEnd.toISOString(), events: input }),
+      { max_tokens: integerEnv("DAILY_BRIEFING_FALLBACK_MAX_OUTPUT_TOKENS", 3000, 256) },
+    );
+    const content = response.trim();
+    if (content) return content;
+    console.warn("[daily-briefing] Markdown fallback returned an empty response; using local fallback");
+  } catch (error) {
+    console.warn(`[daily-briefing] Markdown fallback failed; using local fallback: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return plainTextFallback(input, windowStart, windowEnd);
 }
 
 function providerFromEnv(): WebhookProvider {
@@ -169,8 +222,16 @@ async function main(): Promise<void> {
     }
     const response = await chatCompletion("你是机构情报分析师。只返回 JSON，不要 Markdown 或解释。字段必须为 headline、keyDevelopments、crossInstitutionTrends、implications、watchlist。keyDevelopments 是对象数组，每项包含 title、organization、summary、significance、url；其余字段是字符串数组。只使用输入事实，不得补造事件。", JSON.stringify({ windowStart: windowStartIso, windowEnd: windowEndIso, events: input }), { max_tokens: integerEnv("DAILY_BRIEFING_MAX_OUTPUT_TOKENS", 3000, 256) });
     const parsedPayload = parsePayload(response, input);
-    const payload = parsedPayload || fallbackPayload(input);
-    const content = parsedPayload ? markdown(payload, windowStart, windowEnd) : plainTextFallback(input, windowStart, windowEnd);
+    let payload: BriefingPayload;
+    let content: string;
+    if (parsedPayload.ok) {
+      payload = parsedPayload.payload;
+      content = markdown(payload, windowStart, windowEnd);
+    } else {
+      console.warn(`[daily-briefing] JSON parse/validation failed: ${parsedPayload.reason}; 原始响应前 ${parsedPayload.rawPreview.length} 个字符: ${JSON.stringify(parsedPayload.rawPreview)}`);
+      payload = fallbackPayload(input);
+      content = await markdownFallback(input, windowStart, windowEnd);
+    }
     const provider = providerFromEnv();
     const url = webhookUrl(provider);
     if (!url) {

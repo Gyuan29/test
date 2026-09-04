@@ -1,5 +1,5 @@
 import { currentUser } from "@/lib/auth";
-import { getDatabase, json, mapEvent, mapOrganization, type EventRow, type OrganizationRow } from "@/lib/db";
+import { getAuthDatabase, getDatabase, json, mapEvent, mapOrganization, type EventRow, type OrganizationRow } from "@/lib/db";
 
 type SourceHealth = {
   id: string;
@@ -17,7 +17,8 @@ export async function GET(
   const { slug } = await context.params;
   const db = await getDatabase();
   if (!db) return json({ error: "database_unconfigured" }, { status: 503 });
-  if (!(await currentUser(_request, db))) return json({ error: "authentication_required" }, { status: 401 });
+  const authDb = await getAuthDatabase();
+  if (!authDb || !(await currentUser(_request, authDb))) return json({ error: "authentication_required" }, { status: 401 });
 
   const organization = await db
     .prepare("SELECT * FROM organizations WHERE slug = ? LIMIT 1")

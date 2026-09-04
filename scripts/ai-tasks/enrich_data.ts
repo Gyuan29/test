@@ -1,6 +1,7 @@
 /** Enrich organization descriptions from official and discovered public sources. */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -84,7 +85,21 @@ function readProgress(resume: boolean): Progress {
 function saveProgress(progress: Progress): void {
   progress.updatedAt = new Date().toISOString();
   mkdirSync(dirname(progressPath), { recursive: true });
-  writeFileSync(progressPath, `${JSON.stringify(progress, null, 2)}\n`, "utf8");
+  const body = `${JSON.stringify(progress, null, 2)}\n`;
+  const temporaryPath = `${progressPath}.tmp.${process.pid}.${Date.now()}.${randomUUID()}`;
+  try {
+    writeFileSync(temporaryPath, body, { encoding: "utf8", flag: "wx" });
+    try {
+      renameSync(temporaryPath, progressPath);
+    } catch (error) {
+      console.error(`[进度] 原子替换失败，尝试兼容性写入: ${error instanceof Error ? error.message : String(error)}`);
+      writeFileSync(progressPath, body, "utf8");
+      try { unlinkSync(temporaryPath); } catch { /* The fallback may have already moved or removed it. */ }
+    }
+  } catch (error) {
+    try { unlinkSync(temporaryPath); } catch { /* Preserve the original write error. */ }
+    throw error;
+  }
 }
 
 function normalizeDomain(value: string | null): string | null {

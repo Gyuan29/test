@@ -1,11 +1,12 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { setWorkerDatabase } from "../lib/db";
+import { setWorkerAuthDatabase, setWorkerDatabase } from "../lib/db";
 
 interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
+  AUTH_DB?: D1Database;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -48,6 +49,7 @@ const worker = {
     }
 
     setWorkerDatabase(env.DB);
+    setWorkerAuthDatabase(env.AUTH_DB ?? env.DB);
     return handler.fetch(request, env, ctx);
   },
 

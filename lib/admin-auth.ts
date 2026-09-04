@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { currentUser, type AuthenticatedUser } from "@/lib/auth";
-import { getDatabase } from "@/lib/db";
+import { getAuthDatabase } from "@/lib/db";
 
 export type AdminRole = "admin";
 
 export async function getAdminUser(request: Request): Promise<AuthenticatedUser | null> {
-  const db = await getDatabase();
+  const db = await getAuthDatabase();
   if (!db) {
     console.log("[admin-auth] requireAdmin database unavailable");
     return null;

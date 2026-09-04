@@ -278,7 +278,8 @@ function snippetFallback(url: string, snippet: NewsSnippet, warning: string): Ex
 
 async function fetchHtml(url: string, timeoutMs: number, retries: number): Promise<string> {
   let lastError = "request failed";
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
+  const retryLimit = Math.max(0, Math.min(2, Math.trunc(retries)));
+  for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
     try {
       const response = await fetchExternalUrl(url, { timeoutMs, headers: { accept: "text/html,application/xhtml+xml" } });
       if (!response.ok) {
@@ -290,7 +291,7 @@ async function fetchHtml(url: string, timeoutMs: number, retries: number): Promi
     } catch (error) {
       lastError = formatRequestError(error);
     }
-    if (attempt < retries) await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+    if (attempt < retryLimit) await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
   }
   throw new NewsExtractionError(lastError, "fetch_failed");
 }
@@ -308,7 +309,7 @@ export async function extractNews(url: string, options: ExtractNewsOptions = {})
   const canonical = parsedUrl.toString();
   const platform = (options.platform && options.platform in PLATFORM_PATTERNS ? options.platform as Platform : detectPlatform(canonical));
   try {
-    const html = options.html ?? await fetchHtml(canonical, options.timeoutMs ?? 12_000, options.retries ?? 1);
+    const html = options.html ?? await fetchHtml(canonical, options.timeoutMs ?? 20_000, options.retries ?? 1);
     return parseHtml(canonical, html, platform);
   } catch (error) {
     if (options.snippet) return snippetFallback(canonical, options.snippet, formatRequestError(error));

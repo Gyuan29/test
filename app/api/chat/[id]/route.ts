@@ -1,5 +1,5 @@
 import { currentUser } from "@/lib/auth";
-import { getDatabase, json } from "@/lib/db";
+import { getAuthDatabase, json } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function DELETE(request: Request, context: RouteContext): Promise<Response> {
-  const db = await getDatabase();
+  const db = await getAuthDatabase();
   if (!db) return json({ error: "database_unconfigured" }, { status: 503 });
   const user = await currentUser(request, db);
   if (!user) return json({ error: "authentication_required" }, { status: 401 });

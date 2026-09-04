@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join, resolve } from "node:path";
 import { NextRequest, NextResponse } from "next/server";
@@ -10,7 +10,25 @@ export const dynamic = "force-dynamic";
 type Body = { skipHours?: unknown; limit?: unknown; force?: unknown; days?: unknown };
 const DEFAULT_EVENT_LOOKBACK_DAYS = Number(process.env.EVENT_LOOKBACK_DAYS) || 365;
 function integer(value: unknown, fallback: number, minimum = 0): number | null { if (value === undefined) return fallback; const parsed = typeof value === "number" ? value : Number(value); return Number.isInteger(parsed) && parsed >= minimum ? parsed : null; }
-function writeProgress(path: string, progress: Record<string, unknown>): void { writeFileSync(path, `${JSON.stringify({ ...progress, lastUpdated: new Date().toISOString() }, null, 2)}\n`, "utf8"); }
+function safeTaskId(value: string): string { return value.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 96) || "default"; }
+function progressPathForTask(taskId: string): string { return resolve(process.cwd(), "data", `event_search_progress_${safeTaskId(taskId)}.json`); }
+function writeProgress(path: string, progress: Record<string, unknown>): void {
+  const body = `${JSON.stringify({ ...progress, lastUpdated: new Date().toISOString() }, null, 2)}\n`;
+  const temporaryPath = `${path}.tmp.${process.pid}.${Date.now()}.${randomUUID()}`;
+  try {
+    writeFileSync(temporaryPath, body, { encoding: "utf8", flag: "wx" });
+    try {
+      renameSync(temporaryPath, path);
+    } catch (error) {
+      console.error(`[进度] 原子替换失败，尝试兼容性写入: ${error instanceof Error ? error.message : String(error)}`);
+      writeFileSync(path, body, "utf8");
+      try { unlinkSync(temporaryPath); } catch { /* The fallback may have already moved or removed it. */ }
+    }
+  } catch (error) {
+    try { unlinkSync(temporaryPath); } catch { /* Preserve the original write error. */ }
+    throw error;
+  }
+}
 function markFailed(path: string, taskId: string, message: string): void { try { const current = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown> : {}; if (current.taskId && current.taskId !== taskId) return; writeProgress(path, { ...current, taskId, status: "failed", message }); } catch (error) { console.error(`[trigger-event-search:${taskId}] progress failure`, error); } }
 function markRunning(path: string, taskId: string): void { try { const current = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown> : {}; if (current.taskId !== taskId || (current.status && current.status !== "starting")) return; writeProgress(path, { ...current, status: "running" }); } catch (error) { console.error(`[trigger-event-search:${taskId}] progress failure`, error); } }
 
@@ -20,7 +38,7 @@ export async function POST(request: NextRequest) {
   const skipHours = integer(body.skipHours, 24); const limit = body.limit === undefined ? null : integer(body.limit, 1, 1);
   const days = integer(body.days, DEFAULT_EVENT_LOOKBACK_DAYS, 1);
   if (skipHours === null || days === null || (body.limit !== undefined && limit === null)) return NextResponse.json({ success: false, error: "skipHours, days and limit must be valid integers" }, { status: 400 });
-  const taskId = `event_search_${randomUUID()}`; const progressPath = resolve(process.cwd(), "data", "event_search_progress.json"); mkdirSync(resolve(process.cwd(), "data"), { recursive: true });
+  const taskId = `event_search_${randomUUID()}`; const progressPath = progressPathForTask(taskId); mkdirSync(resolve(process.cwd(), "data"), { recursive: true });
   writeProgress(progressPath, { taskId, total: 0, processed: 0, success: 0, failed: 0, currentInstitution: null, status: "starting" });
   const script = join(process.cwd(), "scripts", "ai-tasks", "search_news.ts"); const tsxCli = join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
   if (!existsSync(script) || !existsSync(tsxCli)) { const error = `Search script not found: ${script}`; markFailed(progressPath, taskId, error); return NextResponse.json({ success: false, error }, { status: 500 }); }

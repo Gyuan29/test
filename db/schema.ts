@@ -90,6 +90,8 @@ export const events = sqliteTable(
     translatedTitle: text("translated_title"),
     translatedDescription: text("translated_description"),
     sourceUrl: text("source_url"),
+    // Database-level idempotency key for discovered events.
+    canonicalSourceUrl: text("canonical_source_url"),
     sourceName: text("source_name"),
     createdAt: text("created_at").notNull().default(currentTimestamp()),
   },
@@ -97,6 +99,10 @@ export const events = sqliteTable(
     orgDateIdx: index("events_org_date_idx").on(
       table.organizationId,
       table.eventDate,
+    ),
+    organizationCanonicalSourceUnique: uniqueIndex("events_organization_canonical_source_uq").on(
+      table.organizationId,
+      table.canonicalSourceUrl,
     ),
   }),
 );

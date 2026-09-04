@@ -136,9 +136,9 @@ export default function AdminPage() {
   useEffect(() => {
     if (!shouldPollProgress(eventProgress) || role !== "admin") return undefined;
     let cancelled = false;
-    const poll = async () => { const response = await fetch("/api/admin/event-search-progress", { headers, cache: "no-store" }); if (!response.ok || cancelled) return; const next = await response.json() as Progress; if (!cancelled) setEventProgress(next); };
+    const poll = async () => { const taskId = eventProgress?.taskId; const suffix = taskId ? `?taskId=${encodeURIComponent(taskId)}` : ""; const response = await fetch(`/api/admin/event-search-progress${suffix}`, { headers, cache: "no-store" }); if (!response.ok || cancelled) return; const next = await response.json() as Progress; if (!cancelled) setEventProgress(next); };
     void poll(); const timer = window.setInterval(() => void poll(), 2000); return () => { cancelled = true; window.clearInterval(timer); };
-  }, [eventProgress?.status, role]);
+  }, [eventProgress?.status, eventProgress?.taskId, role]);
 
   async function createOrganization(event: FormEvent) { event.preventDefault(); const response = await fetch("/api/admin/organizations", { method: "POST", headers, body: JSON.stringify(newOrg) }); if (!response.ok) { setErrorMessage("新增机构失败"); return; } setNewOrg({ name: "", description: "", websiteUrl: "" }); setOrgDialog(false); await load(); setMessage("机构已新增"); }
   async function saveDescription(event: FormEvent) { event.preventDefault(); if (!descriptionEdit) return; const response = await fetch("/api/admin/organizations", { method: "PUT", headers, body: JSON.stringify({ entityId: descriptionEdit.id, name: "unchanged", description: descriptionEdit.value }) }); if (!response.ok) { setErrorMessage("简介保存失败"); return; } setDescriptionEdit(null); await load(); setMessage("简介已保存"); }

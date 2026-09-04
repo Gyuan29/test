@@ -8,6 +8,7 @@ type LocalSqliteClient = {
   executeMultiple(sql: string): Promise<void>;
 };
 
+// Business/event schema. Authentication tables live in AUTH_SCHEMA below.
 const LOCAL_SCHEMA = `
   PRAGMA foreign_keys = ON;
 
@@ -55,59 +56,11 @@ const LOCAL_SCHEMA = `
     translated_title TEXT,
     translated_description TEXT,
     source_url TEXT,
+    canonical_source_url TEXT,
     source_name TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
   CREATE INDEX IF NOT EXISTS events_org_date_idx ON events(organization_id, event_date);
-
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    email TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    password_salt TEXT NOT NULL,
-    password_iterations INTEGER NOT NULL,
-    role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
-    failed_login_count INTEGER NOT NULL DEFAULT 0,
-    locked_until TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS sessions (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token_hash TEXT NOT NULL UNIQUE,
-    role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
-    expires_at TEXT NOT NULL,
-    revoked_at TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE INDEX IF NOT EXISTS sessions_user_expiry_idx ON sessions(user_id, expires_at);
-
-  CREATE TABLE IF NOT EXISTS user_provider_settings (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    provider TEXT NOT NULL,
-    model TEXT,
-    base_url TEXT,
-    credential_ciphertext TEXT,
-    credential_nonce TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (user_id, provider)
-  );
-
-  CREATE TABLE IF NOT EXISTS chat_sessions (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    organization_id TEXT REFERENCES organizations(entity_id) ON DELETE SET NULL,
-    title TEXT,
-    messages_json TEXT NOT NULL DEFAULT '[]',
-    revoked_at TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE INDEX IF NOT EXISTS chat_session_time_idx ON chat_sessions(user_id, updated_at);
 
   CREATE TABLE IF NOT EXISTS news_sources (
     id TEXT PRIMARY KEY,
@@ -142,6 +95,55 @@ const LOCAL_SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS briefing_runs_window_idx ON briefing_runs(window_start, window_end);
 
+`;
+
+const AUTH_SCHEMA = `
+  PRAGMA foreign_keys = ON;
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    password_salt TEXT NOT NULL,
+    password_iterations INTEGER NOT NULL,
+    role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+    failed_login_count INTEGER NOT NULL DEFAULT 0,
+    locked_until TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS sessions_user_expiry_idx ON sessions(user_id, expires_at);
+  CREATE TABLE IF NOT EXISTS user_provider_settings (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    model TEXT,
+    base_url TEXT,
+    credential_ciphertext TEXT,
+    credential_nonce TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, provider)
+  );
+  CREATE TABLE IF NOT EXISTS chat_sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    organization_id TEXT,
+    title TEXT,
+    messages_json TEXT NOT NULL DEFAULT '[]',
+    revoked_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS chat_session_time_idx ON chat_sessions(user_id, updated_at);
 `;
 
 class LocalPreparedStatement implements D1PreparedStatement {
@@ -185,26 +187,42 @@ class LocalDatabase implements D1Database {
 }
 
 let localDatabase: Promise<D1Database> | undefined;
+let localAuthDatabase: Promise<D1Database> | undefined;
 let workerDatabase: D1Database | null | undefined;
+let workerAuthDatabase: D1Database | null | undefined;
 
 function isNodeRuntime(): boolean {
   return typeof process !== "undefined" && Boolean(process.versions?.node);
 }
 
-async function createLocalDatabase(): Promise<D1Database> {
+async function createLocalDatabase(schema = LOCAL_SCHEMA, pathOverride?: string): Promise<D1Database> {
   const { createClient } = await import("@libsql/client");
   const { drizzle } = await import("drizzle-orm/libsql");
-  const path = process.env.LOCAL_SQLITE_PATH?.trim() || ":memory:";
+  const path = pathOverride ?? (process.env.LOCAL_SQLITE_PATH?.trim() || ":memory:");
   const url = path === ":memory:" ? "file::memory:" : `file:${path}`;
   const client = createClient({ url });
-  await client.executeMultiple(LOCAL_SCHEMA);
-  const userColumns = await client.execute({ sql: "PRAGMA table_info(users)" });
-  if (!userColumns.rows.some((column) => column.name === "role")) {
-    await client.execute({ sql: "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user'))" });
+  await client.executeMultiple(schema);
+  if (schema === LOCAL_SCHEMA) {
+    const eventColumns = await client.execute({ sql: "PRAGMA table_info(events)" });
+    if (!eventColumns.rows.some((column) => column.name === "canonical_source_url")) {
+      if (path !== ":memory:") {
+        const { copyFile } = await import("node:fs/promises");
+        const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+        await copyFile(path, `${path}.before-canonical-source-url.${stamp}`);
+      }
+      await client.execute({ sql: "ALTER TABLE events ADD COLUMN canonical_source_url TEXT" });
+    }
+    await client.execute({ sql: "CREATE UNIQUE INDEX IF NOT EXISTS events_organization_canonical_source_uq ON events(organization_id, canonical_source_url)" });
   }
-  const sessionColumns = await client.execute({ sql: "PRAGMA table_info(sessions)" });
-  if (!sessionColumns.rows.some((column) => column.name === "role")) {
-    await client.execute({ sql: "ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user'))" });
+  if (schema === AUTH_SCHEMA) {
+    const userColumns = await client.execute({ sql: "PRAGMA table_info(users)" });
+    if (!userColumns.rows.some((column) => column.name === "role")) {
+      await client.execute({ sql: "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user'))" });
+    }
+    const sessionColumns = await client.execute({ sql: "PRAGMA table_info(sessions)" });
+    if (!sessionColumns.rows.some((column) => column.name === "role")) {
+      await client.execute({ sql: "ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user'))" });
+    }
   }
   // Initialize the official Drizzle LibSQL adapter so callers can share the
   // same client without bringing back a native SQLite driver.
@@ -217,6 +235,11 @@ export function setWorkerDatabase(database: D1Database | undefined): void {
   workerDatabase = database ?? null;
 }
 
+/** Set a separate authentication D1 binding; falls back to the legacy binding when omitted. */
+export function setWorkerAuthDatabase(database: D1Database | undefined): void {
+  workerAuthDatabase = database ?? null;
+}
+
 /** Resolve local SQLite in Node and the injected D1 binding in a Worker runtime. */
 export async function getDatabase(): Promise<D1Database | null> {
   if (isNodeRuntime()) {
@@ -224,6 +247,18 @@ export async function getDatabase(): Promise<D1Database | null> {
     return localDatabase;
   }
   return workerDatabase ?? null;
+}
+
+/** Resolve the physically isolated authentication database in Node. */
+export async function getAuthDatabase(): Promise<D1Database | null> {
+  if (isNodeRuntime()) {
+    localAuthDatabase ??= createLocalDatabase(
+      AUTH_SCHEMA,
+      process.env.LOCAL_AUTH_SQLITE_PATH?.trim() || "./.local/auth.sqlite",
+    );
+    return localAuthDatabase;
+  }
+  return workerAuthDatabase ?? workerDatabase ?? null;
 }
 
 export function json(data: unknown, init?: ResponseInit): Response {
@@ -281,6 +316,7 @@ export type EventRow = Record<string, unknown> & {
   translated_title?: string | null;
   translated_description?: string | null;
   source_url?: string | null;
+  canonical_source_url?: string | null;
   source_name?: string | null;
   created_at?: string | null;
 };
@@ -334,6 +370,7 @@ export function mapEvent(row: EventRow): Event {
     translatedTitle: row.translated_title == null ? null : normalizeEventTitle(row.translated_title, title),
     translatedDescription: row.translated_description == null ? null : normalizeEventDescription(row.translated_description, descriptionFallback),
     sourceUrl: row.source_url ?? null,
+    canonicalSourceUrl: row.canonical_source_url ?? null,
     sourceName: row.source_name ?? null,
     createdAt: row.created_at ?? "",
   };

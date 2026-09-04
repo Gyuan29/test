@@ -1,10 +1,10 @@
 import { authenticate, cookieHeader, createSession } from "@/lib/auth";
-import { getDatabase, json } from "@/lib/db";
+import { getAuthDatabase, json } from "@/lib/db";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const db = await getDatabase();
+  const db = await getAuthDatabase();
   if (!db) return json({ error: "database_unconfigured" }, { status: 503 });
   let body: { email?: string; password?: string };
   try { body = await request.json() as { email?: string; password?: string }; } catch { return json({ error: "invalid_json" }, { status: 400 }); }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
-import { getDatabase } from "@/lib/db";
+import { getAuthDatabase, getDatabase } from "@/lib/db";
 import { normalizeEventDate, normalizeEventDescription, normalizeEventTitle } from "@/lib/event-display";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +25,8 @@ export async function GET(request: Request) {
   try {
     const db = await getDatabase();
     if (!db) return NextResponse.json({ success: false, error: "Database is not configured" }, { status: 503 });
-    if (!(await currentUser(request, db))) return NextResponse.json({ success: false, error: "authentication_required" }, { status: 401 });
+    const authDb = await getAuthDatabase();
+    if (!authDb || !(await currentUser(request, authDb))) return NextResponse.json({ success: false, error: "authentication_required" }, { status: 401 });
     const [organizationCount, eventCount, eventResult, organizationResult] = await Promise.all([
       db.prepare("SELECT COUNT(*) AS value FROM organizations").first<{ value: number }>(),
       db.prepare("SELECT COUNT(*) AS value FROM events").first<{ value: number }>(),

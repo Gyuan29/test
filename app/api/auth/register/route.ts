@@ -1,12 +1,12 @@
 import { hashPassword, createSession, cookieHeader } from "@/lib/auth";
-import { getDatabase, json } from "@/lib/db";
+import { getAuthDatabase, json } from "@/lib/db";
 
 export const runtime = "nodejs";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(request: Request): Promise<Response> {
-  const db = await getDatabase();
+  const db = await getAuthDatabase();
   if (!db) return json({ error: "database_unconfigured" }, { status: 503 });
 
   let body: { email?: unknown; password?: unknown };

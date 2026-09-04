@@ -21,7 +21,7 @@ const email = process.env.AUTH_EMAIL?.trim().toLowerCase();
 const password = process.env.AUTH_PASSWORD;
 if (!email || !password) throw new Error(".env.local must contain AUTH_EMAIL and AUTH_PASSWORD");
 
-const databasePath = process.env.LOCAL_SQLITE_PATH?.trim() || resolve(projectRoot, ".local", "d1.sqlite");
+const databasePath = process.env.LOCAL_AUTH_SQLITE_PATH?.trim() || resolve(projectRoot, ".local", "auth.sqlite");
 if (databasePath !== ":memory:") mkdirSync(dirname(databasePath), { recursive: true });
 const client = createClient({ url: databasePath === ":memory:" ? "file::memory:" : `file:${databasePath}` });
 
@@ -33,6 +33,13 @@ const encodedPassword = `pbkdf2$sha256$${iterations}$${saltEncoded}$${digest.toS
 const userId = `env-${createHash("sha256").update(email).digest("hex").slice(0, 32)}`;
 
 try {
+  await client.execute({ sql: `CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
+    password_salt TEXT NOT NULL, password_iterations INTEGER NOT NULL,
+    role TEXT NOT NULL DEFAULT 'user', failed_login_count INTEGER NOT NULL DEFAULT 0,
+    locked_until TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )` });
   await client.execute({
     sql: `INSERT INTO users (id, email, password_hash, password_salt, password_iterations, role, updated_at)
       VALUES (?, ?, ?, ?, ?, 'admin', CURRENT_TIMESTAMP)
@@ -44,9 +51,6 @@ try {
   });
   console.log(`Created or updated admin user ${email} in ${databasePath}`);
 } catch (error) {
-  if (/no such table|does not exist/i.test(String(error))) {
-    throw new Error(`users table is missing in ${databasePath}; run npm run db:init first`);
-  }
   throw error;
 } finally {
   client.close();

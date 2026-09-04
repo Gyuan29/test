@@ -35,7 +35,7 @@ flowchart TD
 
 - `data/search_progress.json`：来源发现进度。
 - `data/enrich_progress.json`：简介生成 checkpoint。
-- `data/event_search_progress.json`：事件搜索进度。
+- `data/event_search_progress_<taskId>.json`：按任务隔离的事件搜索进度；管理端可通过 `taskId` 查询，未指定时读取最近任务。
 - `[漏斗]` 日志：原始候选、Extractor 各策略结果、LLM 保留和去重入库数量。
 
 所有网络请求受连接池、并发限制和超时控制；事件搜索按时间窗口过滤，并在数据库层按来源 URL 防重。

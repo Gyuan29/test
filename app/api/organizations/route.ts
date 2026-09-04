@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { currentUser } from "@/lib/auth";
-import { getDatabase, mapOrganization, type OrganizationRow } from "@/lib/db";
+import { getAuthDatabase, getDatabase, mapOrganization, type OrganizationRow } from "@/lib/db";
 import { buildOrganizationSearch } from "@/lib/organization-search";
 
 export const dynamic = "force-dynamic";
@@ -64,7 +64,8 @@ export async function GET(request: NextRequest) {
         { status: 503 },
       );
     }
-    if (!(await currentUser(request, db))) return NextResponse.json({ success: false, error: "authentication_required" }, { status: 401 });
+    const authDb = await getAuthDatabase();
+    if (!authDb || !(await currentUser(request, authDb))) return NextResponse.json({ success: false, error: "authentication_required" }, { status: 401 });
 
     const { whereClause, values: searchValues } = buildOrganizationSearch(search ?? "");
     const core = searchParams.get("core")?.toLowerCase();

@@ -1,4 +1,4 @@
-import { getDatabase, json } from "@/lib/db";
+import { getAuthDatabase, getDatabase, json } from "@/lib/db";
 import { currentUser } from "@/lib/auth";
 
 type NewsSource = {
@@ -23,7 +23,8 @@ export async function GET(request: Request) {
   if (!db) {
     return json({ error: "database_unconfigured" }, { status: 503 });
   }
-  if (!(await currentUser(request, db))) return json({ error: "authentication_required" }, { status: 401 });
+  const authDb = await getAuthDatabase();
+  if (!authDb || !(await currentUser(request, authDb))) return json({ error: "authentication_required" }, { status: 401 });
   const organizationSlug = new URL(request.url).searchParams.get("organization");
   try {
     const result = await db
@@ -51,7 +52,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const db = await getDatabase();
   if (!db) return json({ error: "database_unconfigured" }, { status: 503 });
-  if (!(await currentUser(request, db))) return json({ error: "authentication_required" }, { status: 401 });
+  const authDb = await getAuthDatabase();
+  if (!authDb || !(await currentUser(request, authDb))) return json({ error: "authentication_required" }, { status: 401 });
   let body: { organizationSlug?: string; limit?: number } = {};
   try {
     body = (await request.json()) as typeof body;
