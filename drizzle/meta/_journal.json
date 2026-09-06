@@ -43,6 +43,13 @@
       "when": 1788200000000,
       "tag": "0007_add_event_unique_constraint",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788652800000,
+      "tag": "0008_add_organization_cleaning_audit",
+      "breakpoints": true
     }
   ]
 }

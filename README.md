@@ -183,3 +183,60 @@ npm test
 ## 数据与安全
 
 运行数据、密钥、`.local/`、`data/`、DOCX 输入、checkpoint 和备份文件不应提交到 Git。所有数据库写入使用参数化查询或 ORM；抓取任务必须遵守站点规则和频率限制。
+
+## 交接与恢复
+
+接收方应先执行 `npm ci`，从 `.env.example` 创建自己的 `.env.local`，再放入已交接的数据文件。不要复制发送方的 `.env.local`、历史环境备份或任何 API Key、Webhook、Cookie。首次使用空库时执行：
+
+```bash
+npm run db:init
+npm run auth:create-first-admin
+npm run dev
+```
+
+已有数据库在应用首次访问本地库时会进行幂等的缺列补齐；该过程只会新增列和索引，并在确有缺列时创建 `.before-schema-upgrade.<timestamp>` 备份。生产或重要交接库仍应先单独复制一份原始 SQLite 文件。`npm run db:init` 使用 Drizzle 迁移，适用于空库或已由同一迁移链管理的库；对来源不明的历史库，先复制备份并启动应用完成运行时校验。
+
+### 数据库 Schema 兼容性
+
+`organizations` 的运行时 Schema 除基础机构字段外，还包括：
+
+- 来源与调度：`sources`、`last_searched_at`、`search_status`、`last_event_searched_at`、`event_search_status`
+- 名称清洗审计：`cleaning_status`、`audit_note`、`retry_count`
+
+`events` 还包括：`translated_title`、`translated_description`、`relevance_score`、`canonical_source_url`。后者与 `organization_id` 共同构成 URL 去重索引。不要通过手工建表省略这些列；否则事件搜索、管理 API 或清洗脚本可能在运行时返回 SQLite 缺列错误。
+
+### 维护命令
+
+先运行 `--dry-run`，确认目标库与输入 JSON 后，再执行会写库的命令。涉及 LLM 的命令要求 `.env.local` 中的 LLM 配置有效。
+
+```bash
+# 只读诊断 / 导出
+npm run maintenance:diag-orgs
+npm run maintenance:diag-org-names
+node --env-file-if-exists=.env.local --import tsx scripts/maintenance/generate-cleaning-audit-json.ts
+node --env-file-if-exists=.env.local --import tsx scripts/maintenance/export-cleaning-report.ts
+
+# 名称清洗与审计同步（先 dry-run；写入前会要求输入 YES）
+npm run maintenance:clean-org-names -- --dry-run
+node --env-file-if-exists=.env.local --import tsx scripts/maintenance/apply-audit-tags.ts --dry-run
+node --env-file-if-exists=.env.local --import tsx scripts/maintenance/retry-failed-names.ts --dry-run
+node --env-file-if-exists=.env.local --import tsx scripts/maintenance/sync-audit-to-db.ts --dry-run
+
+# 指定数据库的事件字段升级与本地鉴权库迁移
+npm run db:migrate-events-schema
+npm run auth:migrate-local
+```
+
+`apply-audit-tags.ts`、`retry-failed-names.ts` 和 `sync-audit-to-db.ts` 会在必要时幂等添加清洗审计列。`merge-databases.ts` 会创建目标库的预合并备份并写入目标库，只能在确认源库、目标库路径后运行。
+
+### U 盘数据清单
+
+必须传输：
+
+- `.local/d1.sqlite`：业务数据和事件；`.local/auth.sqlite`：本地用户、会话与鉴权数据。两者均包含敏感运行数据，应使用加密介质。
+- `data/raw_organizations.json`、`data/organization_sources_secure.json`、`data/known_domains_whitelist.json`：继续来源发现和导入所需的输入/结果。
+- `data/manual_audit_sample.json`、`data/valid_names.json`：名称清洗审计与重试所需输入。
+- 如需断点续跑，同时传输 `data/search_progress.json`、`data/enrich_progress.json`、`data/name_clean_progress_*.json` 及任何 `data/event_search_progress_*.json`。
+- 如需复现日志审计，传输 `data/data.txt`；如需保留回滚能力，另传输 `.local/d1.sqlite.before-*`、`.local/d1.sqlite.pre-merge.backup` 等明确需要的数据库备份。
+
+不应传输：`node_modules/`、`.next/`、`dist/`、`*.tsbuildinfo`、日志和临时文件；`.env.local`、`.env.local.backup.*`、`*.pem`、Cookie、API Key、Webhook 地址和其他密钥。接收方应基于 `.env.example` 重新配置凭据，并使用 `scripts/maintenance/verify-env-keys.ps1` 仅核对变量名是否一致。

@@ -92,11 +92,25 @@ async function readOrganizations(client: Client): Promise<Organization[]> {
   return (result.rows as unknown as Record<string, unknown>[]).map((row) => ({ entity_id: asString(row.entity_id), name: asString(row.name), original_name: asString(row.original_name) }));
 }
 
-async function checkSchema(client: Client): Promise<void> {
+async function ensureSchema(client: Client, dryRun: boolean): Promise<void> {
   const result = await client.execute("PRAGMA table_info(organizations)");
   const columns = new Set((result.rows as unknown as Record<string, unknown>[]).map((row) => asString(row.name)));
+  const definitions: Record<string, string> = {
+    cleaning_status: "ALTER TABLE organizations ADD COLUMN cleaning_status TEXT NOT NULL DEFAULT 'unreviewed'",
+    audit_note: "ALTER TABLE organizations ADD COLUMN audit_note TEXT",
+    retry_count: "ALTER TABLE organizations ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0",
+  };
   const missing = REQUIRED_COLUMNS.filter((column) => !columns.has(column));
-  if (missing.length) throw new Error(`Missing columns: ${missing.join(", ")}. Apply the ALTER TABLE statements shown in the runbook before running this script.`);
+  for (const column of missing) console.log(`[audit-tags] ${dryRun ? "WOULD EXECUTE" : "EXECUTE"} ${definitions[column]};`);
+  if (dryRun || !missing.length) return;
+  await client.execute("BEGIN");
+  try {
+    for (const column of missing) await client.execute(definitions[column]);
+    await client.execute("COMMIT");
+  } catch (error) {
+    await client.execute("ROLLBACK").catch(() => undefined);
+    throw error;
+  }
 }
 
 function matchOrganizations(organizations: Organization[], auditName: string): Organization[] {
@@ -123,11 +137,7 @@ async function main(): Promise<void> {
   const tagsByName = collectTags(audit);
   const client: Client = createClient({ url: DB_URL });
   try {
-    try { await checkSchema(client); }
-    catch (error) {
-      if (!dryRun) throw error;
-      console.warn(`[audit-tags] dry-run schema warning: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    await ensureSchema(client, dryRun);
     const organizations = await readOrganizations(client);
     const updates = new Map<string, PendingUpdate>();
     let unmatched = 0;

@@ -47,6 +47,11 @@ export const organizations = sqliteTable(
       .notNull()
       .default("pending"),
 
+    // Organization-name cleaning audit fields.
+    cleaningStatus: text("cleaning_status").notNull().default("unreviewed"),
+    auditNote: text("audit_note"),
+    retryCount: integer("retry_count").notNull().default(0),
+
     createdAt: text("created_at").notNull().default(currentTimestamp()),
     updatedAt: text("updated_at").notNull().default(currentTimestamp()),
   },

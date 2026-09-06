@@ -36,6 +36,14 @@ const LOCAL_SCHEMA = `
     location_confidence TEXT,
     summary TEXT,
     website_url TEXT,
+    sources TEXT NOT NULL DEFAULT '[]',
+    last_searched_at TEXT,
+    search_status TEXT NOT NULL DEFAULT 'pending',
+    last_event_searched_at TEXT,
+    event_search_status TEXT NOT NULL DEFAULT 'pending',
+    cleaning_status TEXT NOT NULL DEFAULT 'unreviewed',
+    audit_note TEXT,
+    retry_count INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
@@ -45,6 +53,8 @@ const LOCAL_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_organizations_context ON organizations(context);
   CREATE INDEX IF NOT EXISTS organizations_type_region_idx ON organizations(entity_type, region);
   CREATE INDEX IF NOT EXISTS organizations_credibility_idx ON organizations(credibility_score);
+  CREATE INDEX IF NOT EXISTS organizations_search_schedule_idx ON organizations(search_status, last_searched_at);
+  CREATE INDEX IF NOT EXISTS organizations_event_search_schedule_idx ON organizations(event_search_status, last_event_searched_at);
 
   CREATE TABLE IF NOT EXISTS events (
     id TEXT PRIMARY KEY,
@@ -55,6 +65,7 @@ const LOCAL_SCHEMA = `
     summary TEXT,
     translated_title TEXT,
     translated_description TEXT,
+    relevance_score INTEGER,
     source_url TEXT,
     canonical_source_url TEXT,
     source_name TEXT,
@@ -191,6 +202,24 @@ let localAuthDatabase: Promise<D1Database> | undefined;
 let workerDatabase: D1Database | null | undefined;
 let workerAuthDatabase: D1Database | null | undefined;
 
+const ORGANIZATION_COLUMN_DEFINITIONS: Record<string, string> = {
+  sources: "TEXT NOT NULL DEFAULT '[]'",
+  last_searched_at: "TEXT",
+  search_status: "TEXT NOT NULL DEFAULT 'pending'",
+  last_event_searched_at: "TEXT",
+  event_search_status: "TEXT NOT NULL DEFAULT 'pending'",
+  cleaning_status: "TEXT NOT NULL DEFAULT 'unreviewed'",
+  audit_note: "TEXT",
+  retry_count: "INTEGER NOT NULL DEFAULT 0",
+};
+
+const EVENT_COLUMN_DEFINITIONS: Record<string, string> = {
+  translated_title: "TEXT",
+  translated_description: "TEXT",
+  relevance_score: "INTEGER",
+  canonical_source_url: "TEXT",
+};
+
 function isNodeRuntime(): boolean {
   return typeof process !== "undefined" && Boolean(process.versions?.node);
 }
@@ -203,15 +232,38 @@ async function createLocalDatabase(schema = LOCAL_SCHEMA, pathOverride?: string)
   const client = createClient({ url });
   await client.executeMultiple(schema);
   if (schema === LOCAL_SCHEMA) {
-    const eventColumns = await client.execute({ sql: "PRAGMA table_info(events)" });
-    if (!eventColumns.rows.some((column) => column.name === "canonical_source_url")) {
+    const tableColumns = async (table: "organizations" | "events"): Promise<Set<string>> => {
+      const result = await client.execute({ sql: `PRAGMA table_info(${table})` });
+      return new Set(result.rows.map((column) => String(column.name)));
+    };
+    const missingColumns = async (table: "organizations" | "events", definitions: Record<string, string>): Promise<string[]> => {
+      const columns = await tableColumns(table);
+      return Object.keys(definitions).filter((column) => !columns.has(column));
+    };
+    const missingOrganizationColumns = await missingColumns("organizations", ORGANIZATION_COLUMN_DEFINITIONS);
+    const missingEventColumns = await missingColumns("events", EVENT_COLUMN_DEFINITIONS);
+    if (missingOrganizationColumns.length || missingEventColumns.length) {
       if (path !== ":memory:") {
         const { copyFile } = await import("node:fs/promises");
         const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
-        await copyFile(path, `${path}.before-canonical-source-url.${stamp}`);
+        await copyFile(path, `${path}.before-schema-upgrade.${stamp}`);
       }
-      await client.execute({ sql: "ALTER TABLE events ADD COLUMN canonical_source_url TEXT" });
+      await client.execute({ sql: "BEGIN" });
+      try {
+        for (const column of missingOrganizationColumns) {
+          await client.execute({ sql: `ALTER TABLE organizations ADD COLUMN ${column} ${ORGANIZATION_COLUMN_DEFINITIONS[column]}` });
+        }
+        for (const column of missingEventColumns) {
+          await client.execute({ sql: `ALTER TABLE events ADD COLUMN ${column} ${EVENT_COLUMN_DEFINITIONS[column]}` });
+        }
+        await client.execute({ sql: "COMMIT" });
+      } catch (error) {
+        await client.execute({ sql: "ROLLBACK" }).catch(() => undefined);
+        throw error;
+      }
     }
+    await client.execute({ sql: "CREATE INDEX IF NOT EXISTS organizations_search_schedule_idx ON organizations(search_status, last_searched_at)" });
+    await client.execute({ sql: "CREATE INDEX IF NOT EXISTS organizations_event_search_schedule_idx ON organizations(event_search_status, last_event_searched_at)" });
     await client.execute({ sql: "CREATE UNIQUE INDEX IF NOT EXISTS events_organization_canonical_source_uq ON events(organization_id, canonical_source_url)" });
   }
   if (schema === AUTH_SCHEMA) {
@@ -301,6 +353,9 @@ export type OrganizationRow = Record<string, unknown> & {
   search_status?: string | null;
   last_event_searched_at?: string | null;
   event_search_status?: string | null;
+  cleaning_status?: string | null;
+  audit_note?: string | null;
+  retry_count?: number | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -351,6 +406,9 @@ export function mapOrganization(row: OrganizationRow): Organization {
     searchStatus: row.search_status === "success" || row.search_status === "failed" ? row.search_status : "pending",
     lastEventSearchedAt: row.last_event_searched_at ?? null,
     eventSearchStatus: row.event_search_status === "success" || row.event_search_status === "failed" ? row.event_search_status : "pending",
+    cleaningStatus: row.cleaning_status ?? "unreviewed",
+    auditNote: row.audit_note ?? null,
+    retryCount: row.retry_count ?? 0,
     createdAt: row.created_at ?? "",
     updatedAt: row.updated_at ?? "",
   };
